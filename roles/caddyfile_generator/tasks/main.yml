@@ -1,0 +1,20 @@
+---
+- stat:
+    path: "{{ appdata_path }}/caddy/Caddyfile"
+  register: test
+
+- name: ensure destination Caddyfile is removed
+  file:
+    path: "{{ appdata_path }}/caddy/Caddyfile"
+    state: absent
+  when: test.stat is defined and test.stat.isdir is not defined
+
+- name: ensure destination for Caddyfile
+  file:
+    path: "{{ appdata_path }}/caddy"
+    state: directory
+
+- name: write Caddyfile file
+  template:
+    src: ../templates/Caddyfile.j2
+    dest: "{{ appdata_path }}/caddy/Caddyfile"

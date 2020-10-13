@@ -1,0 +1,52 @@
+---
+ssh_key_name: "{{ vault_ssh_key_name }}"
+hcloud_token: "{{ vault_hetzner_token }}"
+ssh_key_public_key: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+hetzner_dns_token: "{{ vault_hetzner_dns_token }}"
+domain: "{{ vault_domain }}"
+
+cluster_state: present
+
+# global vars
+global_env_vars:
+  - "PUID=1000"
+  - "PGID=1000"
+  - "TZ=Atlantic/Canary"
+  - "DOMAIN=$DOMAIN"
+appdata_path: /opt/appdata
+container_config_path: /config
+container_data_path: /data
+
+# container definitions
+containers:
+  - service_name: rancher
+    active: true
+    restart: unless-stopped
+    image: rancher/rancher
+    container_name: rancher
+    privileged: true
+    depends_on:
+      - caddy
+    volumes:
+      - "{{ appdata_path }}/rancher:/var/lib/rancher"
+    ports:
+      - 8080:80
+    command:
+      - --no-cacerts
+  - service_name: caddy
+    active: true
+    container_name: caddy
+    image: caddy:alpine
+    restart: unless-stopped
+    include_global_env_vars: true
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro                    # For docker
+      - "{{ appdata_path }}/caddy/Caddyfile:/etc/caddy/Caddyfile"   # Caddyfile
+      - "{{ appdata_path }}/caddy/data:/data/caddy"                 # certificates
+      # - "{{ appdata_path }}/caddy/config:/config"                   # json
+
+reverse_proxy:
+  - subdomain: rancher

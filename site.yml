@@ -1,0 +1,152 @@
+---
+- name: Create Rancher controller
+  hosts: localhost
+  connection: local
+  gather_facts: False
+  user: root
+
+  tasks:
+    # Destroy the dns if absent
+    - name: Destroy all
+      when: cluster_state == "absent"
+      block:
+        - name: run the terraform script
+          terraform:
+            project_path: "{{ playbook_dir }}/terraform/"
+            state: "{{ cluster_state }}"
+        - name: destroy everything
+          file:
+            path: "{{ item }}"
+            state: "{{ cluster_state }}"
+          with_items:
+            - inventory/host
+            - inventory
+            - group_vars/rancher.yml
+            - "{{ playbook_dir }}/terraform/terraform.tfvars"
+            - "{{ playbook_dir }}/terraform/.terraform/"
+
+
+    - name: Create ssh key
+      hcloud_ssh_key:
+        api_token: "{{ hcloud_token }}"
+        name: "{{ ssh_key_name }}"
+        public_key: "{{ ssh_key_public_key }}"
+        state: "{{ cluster_state }}"
+
+    - name: Create the rancher host
+      hcloud_server:
+          api_token: "{{ hcloud_token }}"
+          name: rancher
+          server_type: cx11
+          image: ubuntu-20.04
+          location: nbg1
+          ssh_keys:
+            - "{{ ssh_key_name }}"
+          state: "{{ cluster_state }}"
+      register: server
+
+    - name: Create a basic network
+      hcloud_network:
+        api_token: "{{ hcloud_token }}"
+        name: priv-net1
+        ip_range: 10.0.0.0/8
+        state: "{{ cluster_state }}"
+
+    - name: Create a basic subnetwork
+      hcloud_subnetwork:
+        api_token: "{{ hcloud_token }}"
+        network: priv-net1
+        ip_range: 10.0.0.0/16
+        network_zone: eu-central
+        type: server
+        state: present
+      when: cluster_state == "present"
+
+    - name: Create a basic server network
+      hcloud_server_network:
+        api_token: "{{ hcloud_token }}"
+        network: priv-net1
+        server: rancher
+        state: present
+      when: cluster_state == "present"
+
+    - name: Create the dynamic inventory
+      when: cluster_state == "present"
+      block:
+        - name: create the inventory directory
+          file:
+            path: inventory/
+            state: directory
+        - name: Create dynamic inventory
+          file:
+            path: inventory/host
+            state: touch
+        - name: Add IP to file
+          blockinfile:
+            path: inventory/host
+            block: |
+              [rancher]
+              {{ server.hcloud_server.ipv4_address }}
+        - name: Ensure old dynamic rancher vars is removed
+          file:
+            path: group_vars/rancher.yml
+            state: absent
+        - name: Create dynamic rancher vars
+          file:
+            path: group_vars/rancher.yml
+            state: touch
+        - name: add retrieved IP to file
+          blockinfile:
+            path: group_vars/rancher.yml
+            marker: ""
+            block: |
+              ---
+
+              rancher_ip: {{ server.hcloud_server.ipv4_address }}
+        - name: Add host
+          add_host:
+            hostname: "{{ server.hcloud_server.ipv4_address }}"
+            groupname: rancher
+
+    - name: create teraform.tfvars
+      when: cluster_state == "present"
+      include_role:
+        name: terra-provision
+
+    - name: init the terraform if .terraform is not there
+      when: cluster_state == "present"
+      shell: terraform init
+      args:
+        chdir: "{{ playbook_dir }}/terraform/"
+        creates: "{{ playbook_dir }}/terraform/.terraform/"
+
+    - name: run the terraform script
+      when: cluster_state == "present"
+      terraform:
+        project_path: "{{ playbook_dir }}/terraform/"
+        state: "{{ cluster_state }}"
+
+    - name: Collect facts again
+      setup:
+
+- hosts: rancher
+  gather_facts: false
+  tasks:
+    - name: Collect facts again
+      when: cluster_state == "present"
+      setup:
+      
+    - name: Install docker
+      when: cluster_state == "present"
+      include_role:
+        name: geerlingguy.docker
+
+    - name: docker-compose generator
+      when: cluster_state == "present"
+      include_role:
+        name: docker_compose_generator
+
+    - name: caddyfile_generator
+      when: cluster_state == "present"
+      include_role:
+        name: caddyfile_generator

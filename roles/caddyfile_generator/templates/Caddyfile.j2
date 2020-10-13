@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+{% for reverse_proxy in reverse_proxy %}
+rancher.{{ vault_domain }} {
+  reverse_proxy {{ rancher_ip }}:8080
+}
+{% endfor %}

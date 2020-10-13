@@ -1,0 +1,10 @@
+---
+- name: docker compose down and up
+  block:
+    - name: Tear down existing services
+      community.general.docker_compose:
+        project_src: "~"
+        state: absent
+    - name: Create and start services
+      community.general.docker_compose:
+        project_src: "~"
